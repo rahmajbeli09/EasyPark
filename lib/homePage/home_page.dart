@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../data/database_helper.dart';
+import '../notifications/notification_service.dart';
 import 'login.dart';
 
 class HomePage extends StatefulWidget {
@@ -15,11 +16,14 @@ class _HomePageState extends State<HomePage> {
   List<Map<String, dynamic>> _allParkings = [];
   List<Map<String, dynamic>> _filteredParkings = [];
   final Set<int> _reservedIds = <int>{};
+  final TextEditingController _hoursCtrl = TextEditingController(text: '1');
   
   Future<void> _reserveSpot(Map<String, dynamic> p, int filteredIndex) async {
     final dynamic rawId = p['id'];
     final int? id = rawId is int ? rawId : int.tryParse(rawId?.toString() ?? '');
     if (id == null) return;
+    final int? hours = await _promptReservationHours();
+    if (hours == null || hours <= 0) return;
     final int currentAvail = int.tryParse((p['availablePlaces'] ?? '').toString()) ?? (p['availablePlaces'] ?? 0);
     if (currentAvail <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -29,6 +33,19 @@ class _HomePageState extends State<HomePage> {
     }
     final int newAvail = currentAvail - 1;
     await DatabaseHelper.instance.updateParking(id, {'availablePlaces': newAvail});
+
+    // Schedule reminder at (now + hours - 5 minutes)
+    final DateTime now = DateTime.now();
+    DateTime when = now.add(Duration(hours: hours)).subtract(const Duration(minutes: 5));
+    if (!when.isAfter(now)) {
+      when = now.add(const Duration(minutes: 1));
+    }
+    await NotificationService.instance.scheduleReminder(
+      id: id,
+      title: 'Rappel de réservation',
+      body: 'Votre réservation se termine dans 5 minutes. Pensez à libérer la place.',
+      when: when,
+    );
     if (!mounted) return;
     setState(() {
       // Mettre à jour via nouvelles listes (évite les listes en lecture seule)
@@ -58,8 +75,10 @@ class _HomePageState extends State<HomePage> {
       _reservedIds.add(id);
     });
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Place réservée')), 
+      const SnackBar(content: Text('Place réservée')),
     );
+    // Afficher le QR code via API externe
+    await _showQrForReservation(id: id, hours: hours, endAt: now.add(Duration(hours: hours)));
   }
 
   Future<void> _cancelReservation(Map<String, dynamic> p, int filteredIndex) async {
@@ -69,6 +88,7 @@ class _HomePageState extends State<HomePage> {
     final int currentAvail = int.tryParse((p['availablePlaces'] ?? '').toString()) ?? (p['availablePlaces'] ?? 0);
     final int newAvail = currentAvail + 1;
     await DatabaseHelper.instance.updateParking(id, {'availablePlaces': newAvail});
+    await NotificationService.instance.cancel(id);
     if (!mounted) return;
     setState(() {
       _allParkings = _allParkings.map((e) {
@@ -356,6 +376,76 @@ class _HomePageState extends State<HomePage> {
           BottomNavigationBarItem(icon: Icon(Icons.location_on), label: 'Carte'),
           BottomNavigationBarItem(icon: Icon(Icons.receipt), label: 'Réservations'),
           BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profil'),
+        ],
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _hoursCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<int?> _promptReservationHours() async {
+    _hoursCtrl.text = _hoursCtrl.text.isEmpty ? '1' : _hoursCtrl.text;
+    final result = await showDialog<int>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Durée de réservation'),
+          content: TextField(
+            controller: _hoursCtrl,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: "Nombre d'heures",
+              hintText: 'Ex: 1',
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Annuler')),
+            TextButton(
+              onPressed: () {
+                final h = int.tryParse(_hoursCtrl.text.trim());
+                if (h == null || h <= 0) {
+                  Navigator.of(ctx).pop();
+                } else {
+                  Navigator.of(ctx).pop(h);
+                }
+              },
+              child: const Text('Valider'),
+            ),
+          ],
+        );
+      },
+    );
+    return result;
+  }
+
+  Future<void> _showQrForReservation({required int id, required int hours, required DateTime endAt}) async {
+    final payload = {
+      'parkingId': id,
+      'hours': hours,
+      'endAt': endAt.toIso8601String(),
+    };
+    final dataString = Uri.encodeComponent(payload.toString());
+    final url = 'https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=' + dataString;
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Votre code QR de réservation'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Image.network(url, width: 240, height: 240),
+            const SizedBox(height: 12),
+            const Text("Scannez ce code à l'entrée du parking."),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Fermer')),
         ],
       ),
     );

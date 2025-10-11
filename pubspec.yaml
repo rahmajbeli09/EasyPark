@@ -37,6 +37,9 @@ dependencies:
   google_fonts: ^6.1.0
   sqflite: ^2.3.3+1
   path: ^1.9.0
+  flutter_local_notifications: ^17.2.1
+  timezone: ^0.9.4
+  mobile_scanner: ^6.0.2
 
 dev_dependencies:
   flutter_test:
