@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../data/database_helper.dart';
 import 'home_page.dart';
 import 'HomeParking.dart';
+import 'HomeAdmin.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -48,6 +49,13 @@ class _LoginPageState extends State<LoginPage> {
         return;
       }
       if (!mounted) return;
+      // Redirection spécifique: admin par email
+      if (email.toLowerCase() == 'hela.nefla@gmail.com') {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const HomeAdmin()),
+        );
+        return;
+      }
       // Succès: rediriger selon le rôle
       final role = (user['role'] as String?)?.toLowerCase() ?? 'conducteur';
       final userId = (user['id'] is int)
@@ -64,7 +72,7 @@ class _LoginPageState extends State<LoginPage> {
         );
       } else {
         Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const HomePage()),
+          MaterialPageRoute(builder: (_) => HomePage(currentUserId: userId ?? 0, currentUserEmail: email)),
         );
       }
     } catch (_) {
